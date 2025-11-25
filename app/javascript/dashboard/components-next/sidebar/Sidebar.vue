@@ -96,7 +96,9 @@ const sidebarToggleIcon = computed(() =>
 );
 
 const sidebarWidthClass = computed(() =>
-  isSidebarCollapsed.value ? 'md:w-12 md:basis-12' : 'md:w-[200px] md:basis-[200px]'
+  isSidebarCollapsed.value
+    ? 'md:w-12 md:basis-12'
+    : 'md:w-[200px] md:basis-[200px]'
 );
 
 const closeMobileSidebar = () => {
