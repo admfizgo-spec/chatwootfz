@@ -18,7 +18,6 @@ WORKDIR /app
 
 # Copiar arquivos de dependências primeiro (cache layer)
 COPY package.json pnpm-lock.yaml ./
-COPY .npmrc .nvmrc ./
 
 # Instalar pnpm e dependências
 RUN npm install -g pnpm@latest
