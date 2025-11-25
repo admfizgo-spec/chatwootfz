@@ -1,103 +1,153 @@
 # ============================================
 # Dockerfile de Produção - Chatwoot Customizado
 # ============================================
-# Este Dockerfile constrói uma imagem customizada do Chatwoot
-# com suas modificações de frontend mantidas
+# Baseado no Dockerfile oficial do Chatwoot com otimizações
 
-# Estágio 1: Build do Frontend
-FROM node:20-bookworm-slim AS frontend-builder
+# Estágio 1: Pre-builder (instalar dependências e compilar assets)
+FROM node:23-alpine as node
+FROM ruby:3.4-alpine3.21 AS pre-builder
+
+# Versões
+ARG NODE_VERSION="23.7.0"
+ARG PNPM_VERSION="10.2.0"
+ENV NODE_VERSION=${NODE_VERSION}
+ENV PNPM_VERSION=${PNPM_VERSION}
+
+# Configurações de build
+ARG BUNDLE_WITHOUT="development:test"
+ENV BUNDLE_WITHOUT=${BUNDLE_WITHOUT}
+ENV BUNDLER_VERSION=2.5.11
+
+ARG RAILS_SERVE_STATIC_FILES=true
+ENV RAILS_SERVE_STATIC_FILES=${RAILS_SERVE_STATIC_FILES}
+
+ARG RAILS_ENV=production
+ENV RAILS_ENV=${RAILS_ENV}
+
+ARG NODE_OPTIONS="--max-old-space-size=4096"
+ENV NODE_OPTIONS=${NODE_OPTIONS}
+
+ENV BUNDLE_PATH="/gems"
 
 # Instalar dependências do sistema
-RUN apt-get update && apt-get install -y \
-    git \
-    python3 \
-    build-essential \
-    && rm -rf /var/lib/apt/lists/*
-
-WORKDIR /app
-
-# Copiar arquivos de dependências primeiro (cache layer)
-COPY package.json pnpm-lock.yaml ./
-
-# Instalar pnpm e dependências
-RUN npm install -g pnpm@latest
-RUN pnpm install --frozen-lockfile
-
-# Copiar código fonte (incluindo suas customizações)
-COPY . .
-
-# Build do frontend em produção
-ENV NODE_ENV=production
-ENV RAILS_ENV=production
-RUN pnpm build
-
-# ============================================
-# Estágio 2: Imagem de Produção
-# ============================================
-FROM ruby:3.3-slim-bookworm
-
-# Argumentos de build
-ARG RAILS_ENV=production
-ARG BUNDLE_WITHOUT="development:test"
-
-ENV RAILS_ENV=${RAILS_ENV}
-ENV NODE_ENV=production
-ENV BUNDLE_WITHOUT=${BUNDLE_WITHOUT}
-
-# Instalar dependências do sistema para produção
-RUN apt-get update && apt-get install -y \
-    libpq-dev \
+RUN apk update && apk add --no-cache \
+    openssl \
+    tar \
+    build-base \
+    tzdata \
+    postgresql-dev \
     postgresql-client \
     git \
     curl \
-    wget \
-    build-essential \
-    shared-mime-info \
-    tzdata \
-    imagemagick \
-    libvips-dev \
-    && rm -rf /var/lib/apt/lists/*
+    xz \
+    vips \
+    && mkdir -p /var/app \
+    && gem install bundler
 
-# Instalar Node.js 20
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
-    npm install -g pnpm@latest
+# Copiar Node.js da imagem oficial
+COPY --from=node /usr/local/bin/node /usr/local/bin/
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+
+# Instalar pnpm
+RUN npm install -g pnpm@${PNPM_VERSION}
+
+# Configurar pnpm no PATH
+ENV PNPM_HOME="/root/.local/share/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
 
 WORKDIR /app
 
-# Copiar Gemfile primeiro (cache layer)
+# Copiar e instalar gems Ruby
 COPY Gemfile Gemfile.lock ./
+RUN bundle config set --local force_ruby_platform true \
+    && bundle config set without 'development test' \
+    && bundle install -j 4 -r 3
 
-# Instalar gems
-RUN gem install bundler && \
-    bundle config set --local deployment 'true' && \
-    bundle config set --local without ${BUNDLE_WITHOUT} && \
-    bundle install -j "$(nproc)"
+# Copiar e instalar dependências Node.js
+COPY package.json pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 
-# Copiar código da aplicação
-COPY . .
+# Copiar código fonte (incluindo customizações)
+COPY . /app
 
-# Copiar assets compilados do estágio de build do frontend
-COPY --from=frontend-builder /app/public/packs ./public/packs
+# Criar diretório de logs
+RUN mkdir -p /app/log
+
+# Compilar assets de produção (incluindo frontend customizado)
+RUN SECRET_KEY_BASE=precompile_placeholder \
+    RAILS_LOG_TO_STDOUT=enabled \
+    bundle exec rake assets:precompile \
+    && rm -rf spec node_modules tmp/cache
+
+# Gerar arquivo .git_sha
+RUN git rev-parse HEAD > /app/.git_sha 2>/dev/null || echo "no-git" > /app/.git_sha
+
+# Limpar arquivos desnecessários
+RUN rm -rf /gems/ruby/*/cache/*.gem \
+    && find /gems/ruby/*/gems/ \( -name "*.c" -o -name "*.o" \) -delete \
+    && rm -rf .git
+
+# ============================================
+# Estágio 2: Imagem Final de Produção
+# ============================================
+FROM ruby:3.4-alpine3.21
+
+# Versões
+ARG NODE_VERSION="23.7.0"
+ARG PNPM_VERSION="10.2.0"
+ENV NODE_VERSION=${NODE_VERSION}
+ENV PNPM_VERSION=${PNPM_VERSION}
+
+# Configurações
+ARG BUNDLE_WITHOUT="development:test"
+ENV BUNDLE_WITHOUT=${BUNDLE_WITHOUT}
+ENV BUNDLER_VERSION=2.5.11
+
+ARG RAILS_SERVE_STATIC_FILES=true
+ENV RAILS_SERVE_STATIC_FILES=${RAILS_SERVE_STATIC_FILES}
+
+ARG BUNDLE_FORCE_RUBY_PLATFORM=1
+ENV BUNDLE_FORCE_RUBY_PLATFORM=${BUNDLE_FORCE_RUBY_PLATFORM}
+
+ARG RAILS_ENV=production
+ENV RAILS_ENV=${RAILS_ENV}
+ENV BUNDLE_PATH="/gems"
+
+# Instalar dependências runtime
+RUN apk update && apk add --no-cache \
+    openssl \
+    tzdata \
+    postgresql-client \
+    imagemagick \
+    git \
+    vips \
+    && gem install bundler
+
+# Copiar Node.js (não é necessário pnpm em produção)
+COPY --from=node /usr/local/bin/node /usr/local/bin/
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+
+# Copiar gems e aplicação do pre-builder
+COPY --from=pre-builder /gems/ /gems/
+COPY --from=pre-builder /app /app
+
+WORKDIR /app
 
 # Criar usuário não-root para segurança
-RUN groupadd -r chatwoot && \
-    useradd -r -g chatwoot -d /app -s /sbin/nologin chatwoot && \
-    chown -R chatwoot:chatwoot /app
-
-# Criar diretórios necessários
-RUN mkdir -p /app/tmp/pids /app/tmp/cache /app/tmp/sockets /app/log /app/public/packs && \
-    chown -R chatwoot:chatwoot /app/tmp /app/log /app/public
+RUN addgroup -g 1000 chatwoot \
+    && adduser -D -u 1000 -G chatwoot chatwoot \
+    && chown -R chatwoot:chatwoot /app
 
 USER chatwoot
 
-# Expor porta 3000
+# Expor porta
 EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
 
-# Entrypoint e comando
-ENTRYPOINT ["docker/entrypoints/rails.sh"]
+# Comando padrão
 CMD ["bundle", "exec", "rails", "s", "-p", "3000", "-b", "0.0.0.0"]
