@@ -16,7 +16,6 @@ import SidebarProfileMenu from './SidebarProfileMenu.vue';
 import SidebarChangelogCard from './SidebarChangelogCard.vue';
 import ChannelLeaf from './ChannelLeaf.vue';
 import SidebarAccountSwitcher from './SidebarAccountSwitcher.vue';
-import Logo from 'next/icon/Logo.vue';
 import ComposeConversation from 'dashboard/components-next/NewConversation/ComposeConversation.vue';
 
 const props = defineProps({
@@ -37,6 +36,7 @@ const { accountScopedRoute, isOnChatwootCloud } = useAccount();
 const store = useStore();
 const searchShortcut = useKbd([`$mod`, 'k']);
 const { t } = useI18n();
+const isSidebarCollapsed = useStorage('next-sidebar-collapsed', false);
 
 const isACustomBrandedInstance = useMapGetter(
   'globalConfig/isACustomBrandedInstance'
@@ -91,9 +91,21 @@ const sortedInboxes = computed(() =>
   inboxes.value.slice().sort((a, b) => a.name.localeCompare(b.name))
 );
 
+const sidebarToggleIcon = computed(() =>
+  isSidebarCollapsed.value ? 'i-lucide-chevron-right' : 'i-lucide-chevron-left'
+);
+
+const sidebarWidthClass = computed(() =>
+  isSidebarCollapsed.value ? 'md:w-12 md:basis-12' : 'md:w-[200px] md:basis-[200px]'
+);
+
 const closeMobileSidebar = () => {
   if (!props.isMobileSidebarOpen) return;
   emit('closeMobileSidebar');
+};
+
+const toggleSidebarCollapsed = () => {
+  isSidebarCollapsed.value = !isSidebarCollapsed.value;
 };
 
 const newReportRoutes = () => [
@@ -591,6 +603,7 @@ const menuItems = computed(() => {
     ]"
     class="bg-n-solid-2 rtl:border-l ltr:border-r border-n-weak flex flex-col text-sm pb-1 fixed top-0 ltr:left-0 rtl:right-0 h-full z-40 transition-transform duration-200 ease-in-out md:static w-[200px] basis-[200px] md:flex-shrink-0 md:ltr:translate-x-0 md:rtl:-translate-x-0"
     :class="[
+      sidebarWidthClass,
       {
         'shadow-lg md:shadow-none': isMobileSidebarOpen,
         'ltr:-translate-x-full rtl:translate-x-full': !isMobileSidebarOpen,
@@ -599,16 +612,24 @@ const menuItems = computed(() => {
   >
     <section class="grid gap-2 mt-2 mb-4">
       <div class="flex gap-2 items-center px-2 min-w-0">
-        <div class="grid flex-shrink-0 place-content-center size-6">
-          <Logo class="size-4" />
-        </div>
-        <div class="flex-shrink-0 w-px h-3 bg-n-strong" />
+        <Button
+          :aria-label="
+            t(isSidebarCollapsed ? 'SIDEBAR.EXPAND' : 'SIDEBAR.COLLAPSE')
+          "
+          :icon="sidebarToggleIcon"
+          color="slate"
+          size="sm"
+          variant="ghost"
+          class="flex-shrink-0"
+          @click="toggleSidebarCollapsed"
+        />
         <SidebarAccountSwitcher
+          v-if="!isSidebarCollapsed"
           class="flex-grow -mx-1 min-w-0"
           @show-create-account-modal="emit('showCreateAccountModal')"
         />
       </div>
-      <div class="flex gap-2 px-2">
+      <div v-if="!isSidebarCollapsed" class="flex gap-2 px-2">
         <RouterLink
           :to="{ name: 'search' }"
           class="flex gap-2 items-center px-2 py-1 w-full h-7 rounded-lg outline outline-1 outline-n-weak bg-n-solid-3 dark:bg-n-black/30"
@@ -636,7 +657,10 @@ const menuItems = computed(() => {
         </ComposeConversation>
       </div>
     </section>
-    <nav class="grid overflow-y-scroll flex-grow gap-2 px-2 pb-5 no-scrollbar">
+    <nav
+      v-if="!isSidebarCollapsed"
+      class="grid overflow-y-scroll flex-grow gap-2 px-2 pb-5 no-scrollbar"
+    >
       <ul class="flex flex-col gap-1.5 m-0 list-none">
         <SidebarGroup
           v-for="item in menuItems"
@@ -646,6 +670,7 @@ const menuItems = computed(() => {
       </ul>
     </nav>
     <section
+      v-if="!isSidebarCollapsed"
       class="flex flex-col flex-shrink-0 relative gap-1 justify-between items-center"
     >
       <div
