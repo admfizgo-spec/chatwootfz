@@ -1,17 +1,47 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Bundler
 .bundle
+vendor/bundle
+
+# Environment files
 .env
 .env.*
+!.env.example
+
+# Docker files (exceto production)
 docker-compose.*
+!docker-compose.production.yaml
 docker/Dockerfile
 docker/dockerfiles
+
+# Logs and temp files
 log
+tmp
 storage
 public/system
-tmp
-.codeclimate.yml
 public/packs
+
+# Node
 node_modules
-vendor/bundle
+
+# Development tools
+.codeclimate.yml
+.vscode/
+.idea/
+.windsurf/
+
+# Documentation
+*.md
+!README.md
+CLAUDE.md
+CUSTOMIZATION_GUIDE.md
+COOLIFY_DEPLOY.md
+
+# Misc
 .DS_Store
 *.swp
 *~

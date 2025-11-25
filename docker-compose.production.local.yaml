@@ -1,0 +1,157 @@
+# ============================================
+# Docker Compose para Teste Local da Imagem de Produção
+# ============================================
+# Use este arquivo para testar a build de produção localmente
+# antes de fazer o deploy no Coolify
+#
+# Uso:
+#   docker compose -f docker-compose.production.local.yaml build
+#   docker compose -f docker-compose.production.local.yaml up
+
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: chatwoot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chatwoot_production
+      POSTGRES_USER: chatwoot
+      POSTGRES_PASSWORD: chatwoot_secure_password_change_me
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatwoot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: chatwoot-redis
+    restart: unless-stopped
+    command: redis-server --requirepass chatwoot_redis_password_change_me
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  chatwoot-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+      args:
+        RAILS_ENV: production
+        BUNDLE_WITHOUT: "development:test"
+    container_name: chatwoot-web
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      # Rails
+      RAILS_ENV: production
+      SECRET_KEY_BASE: replace_with_secret_key_base_run_rake_secret
+
+      # Database
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: chatwoot_production
+      POSTGRES_USERNAME: chatwoot
+      POSTGRES_PASSWORD: chatwoot_secure_password_change_me
+
+      # Redis
+      REDIS_URL: redis://:chatwoot_redis_password_change_me@redis:6379
+
+      # Chatwoot
+      INSTALLATION_NAME: Chatwoot Custom
+      FRONTEND_URL: http://localhost:3000
+      FORCE_SSL: "false"
+
+      # Mailer (opcional - configure conforme necessário)
+      MAILER_SENDER_EMAIL: noreply@example.com
+      SMTP_DOMAIN: example.com
+      SMTP_ADDRESS: mailhog
+      SMTP_PORT: 1025
+      SMTP_AUTHENTICATION: plain
+      SMTP_ENABLE_STARTTLS_AUTO: "false"
+
+      # Storage (local para teste)
+      ACTIVE_STORAGE_SERVICE: local
+
+      # Features
+      ENABLE_ACCOUNT_SIGNUP: "true"
+
+    volumes:
+      - chatwoot_storage:/app/storage
+      - chatwoot_public:/app/public
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  chatwoot-sidekiq:
+    build:
+      context: .
+      dockerfile: Dockerfile.production
+      args:
+        RAILS_ENV: production
+        BUNDLE_WITHOUT: "development:test"
+    container_name: chatwoot-sidekiq
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: bundle exec sidekiq -C config/sidekiq.yml
+    environment:
+      # Rails
+      RAILS_ENV: production
+      SECRET_KEY_BASE: replace_with_secret_key_base_run_rake_secret
+
+      # Database
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: chatwoot_production
+      POSTGRES_USERNAME: chatwoot
+      POSTGRES_PASSWORD: chatwoot_secure_password_change_me
+
+      # Redis
+      REDIS_URL: redis://:chatwoot_redis_password_change_me@redis:6379
+
+      # Chatwoot
+      INSTALLATION_NAME: Chatwoot Custom
+      FRONTEND_URL: http://localhost:3000
+      FORCE_SSL: "false"
+    volumes:
+      - chatwoot_storage:/app/storage
+
+  # Opcional: Mailhog para testar emails
+  mailhog:
+    image: mailhog/mailhog
+    container_name: chatwoot-mailhog
+    restart: unless-stopped
+    ports:
+      - "1025:1025"  # SMTP
+      - "8025:8025"  # Web UI
+
+volumes:
+  postgres_data:
+  redis_data:
+  chatwoot_storage:
+  chatwoot_public:
